@@ -1,178 +1,184 @@
-import os
-import re
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
-    CallbackQueryHandler,
     MessageHandler,
+    CallbackQueryHandler,
     ContextTypes,
-    filters
+    filters,
 )
 
-# ===== VARIABLES =====
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
+# ================= CONFIG =================
+BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
+ADMIN_ID = 7112312810  # your admin id
+# ==========================================
 
+pending_users = set()
 approved_users = set()
-pending_users = {}
-user_states = {}
 
-# ===== /start =====
+# ---------- START ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
 
     if user.id in approved_users:
-        await show_options(update, context)
+        await update.message.reply_text(
+            "🎉 *Welcome Back!*\n\n"
+            "✅ You are already approved.\n"
+            "📤 Please send your *Referral Text* now.",
+            parse_mode="Markdown"
+        )
         return
 
-    keyboard = [[InlineKeyboardButton("📨 Send Approval", callback_data="send_approval")]]
-    await update.message.reply_text(
-        "🔒 Approval required to use this bot.",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    if user.id in pending_users:
+        await update.message.reply_text(
+            "⏳ *Approval Pending*\n\n"
+            "🛑 Please wait for admin approval.",
+            parse_mode="Markdown"
+        )
+        return
 
-# ===== SEND APPROVAL =====
-async def approval_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+    pending_users.add(user.id)
 
-    user = query.from_user
-    pending_users[user.id] = user
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Approve", callback_data=f"approve_{user.id}"),
+            InlineKeyboardButton("❌ Reject", callback_data=f"reject_{user.id}")
+        ]
+    ]
 
-    keyboard = [[
-        InlineKeyboardButton("✅ Approve", callback_data=f"approve_{user.id}"),
-        InlineKeyboardButton("❌ Reject", callback_data=f"reject_{user.id}")
-    ]]
-
-    msg = (
-        f"📩 *Approval Request*\n\n"
-        f"👤 Name: {user.full_name}\n"
-        f"🆔 User ID: `{user.id}`\n"
-        f"🔗 Username: @{user.username if user.username else 'N/A'}"
+    text = (
+        "📩 *Approval Request*\n\n"
+        f"👤 *Name:* {user.first_name}\n"
+        f"🆔 *User ID:* `{user.id}`\n"
+        f"🔗 *Username:* @{user.username if user.username else 'Not Set'}"
     )
 
     await context.bot.send_message(
         chat_id=ADMIN_ID,
-        text=msg,
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        text=text,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown"
     )
 
-    await query.edit_message_text("✅ Approval request sent to admin.")
+    await update.message.reply_text(
+        "✅ *Approval request sent to admin.*\n"
+        "⏳ Please wait…",
+        parse_mode="Markdown"
+    )
 
-# ===== ADMIN APPROVE / REJECT =====
-async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+# ---------- APPROVE / REJECT ----------
+async def approval_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    action, uid = query.data.split("_")
-    uid = int(uid)
+    data = query.data
+    user_id = int(data.split("_")[1])
 
-    if action == "approve":
-        approved_users.add(uid)
+    if data.startswith("approve"):
+        approved_users.add(user_id)
+        pending_users.discard(user_id)
+
         await context.bot.send_message(
-            chat_id=uid,
-            text="✅ You are approved!\n\nChoose an option:"
+            chat_id=user_id,
+            text=(
+                "🎉 *You Are Approved!*\n\n"
+                "📤 Now send your *Referral Text*."
+            ),
+            parse_mode="Markdown"
         )
-        await show_options_to_user(uid, context)
-        await query.edit_message_text("✅ User Approved")
+
+        await query.edit_message_text(
+            "✅ *User Approved Successfully!*",
+            parse_mode="Markdown"
+        )
+
+    elif data.startswith("reject"):
+        pending_users.discard(user_id)
+
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="❌ *Your request was rejected by admin.*",
+            parse_mode="Markdown"
+        )
+
+        await query.edit_message_text(
+            "❌ *User Rejected!*",
+            parse_mode="Markdown"
+        )
+
+
+# ---------- REFERRAL TEXT ----------
+async def referral_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+
+    if user.id not in approved_users:
+        await update.message.reply_text(
+            "🚫 *Access Denied*\n\n"
+            "❗ You are not approved yet.",
+            parse_mode="Markdown"
+        )
+        return
+
+    text = update.message.text
+
+    # Extract only numeric IDs
+    ids = [i for i in text.split() if i.isdigit()]
+    
+    # Count total IDs
+    total_ids = len(ids)
+    
+    # Join IDs with newlines for easy copying
+    clean_ids = "\n".join(ids)
+
+    # Send formatted message to admin
+    formatted_text = (
+        "🚀 *NEW REFERRALS RECEIVED*\n\n"
+        f"👤 *User:* {user.first_name}\n"
+        f"🆔 *User ID:* `{user.id}`\n"
+        f"📊 *Total IDs:* {total_ids}\n"
+        f"💰 *Total Amount:* ₹{total_ids * 3}\n\n"
+        "📋 *IDs (tap to copy):*"
+    )
+
+    await context.bot.send_message(
+        chat_id=ADMIN_ID,
+        text=formatted_text,
+        parse_mode="Markdown"
+    )
+    
+    # Send IDs separately in monospace format for easy copying
+    if clean_ids:
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"```\n{clean_ids}\n```",
+            parse_mode="Markdown"
+        )
     else:
         await context.bot.send_message(
-            chat_id=uid,
-            text="❌ You aren’t allowed to use this bot.\nAny queries? DM @dtxzahid"
+            chat_id=ADMIN_ID,
+            text="❌ No valid IDs found in the message."
         )
-        await query.edit_message_text("❌ User Rejected")
 
-# ===== OPTIONS =====
-async def show_options(update, context):
-    keyboard = [
-        [InlineKeyboardButton("1️⃣ Single Amount", callback_data="single")],
-        [InlineKeyboardButton("2️⃣ Different Amount", callback_data="different")]
-    ]
+    # Confirm to user
     await update.message.reply_text(
-        "Choose an option:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        f"✅ *Referral text sent successfully!*\n\n"
+        f"📊 Total IDs extracted: {total_ids}",
+        parse_mode="Markdown"
     )
 
-async def show_options_to_user(uid, context):
-    keyboard = [
-        [InlineKeyboardButton("1️⃣ Single Amount", callback_data="single")],
-        [InlineKeyboardButton("2️⃣ Different Amount", callback_data="different")]
-    ]
-    await context.bot.send_message(
-        chat_id=uid,
-        text="Choose an option:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
 
-# ===== OPTION HANDLER (FIXED) =====
-async def option_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    user_states[query.from_user.id] = {
-        "mode": query.data,           # single / different
-        "step": "waiting_referrals",  # FIXED STEP SYSTEM
-        "ids": []
-    }
-
-    await query.edit_message_text("📥 Send the referral text now.")
-
-# ===== TEXT HANDLER (FIXED LOOP ISSUE) =====
-async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    text = update.message.text.strip()
-
-    if user_id not in user_states:
-        return
-
-    state = user_states[user_id]
-
-    # STEP 1: GET REFERRALS
-    if state["step"] == "waiting_referrals":
-        ids = re.findall(r"\b\d{8,12}\b", text)
-
-        if not ids:
-            await update.message.reply_text("❌ No valid User IDs found. Send referral text again.")
-            return
-
-        state["ids"] = ids
-        state["step"] = "waiting_amount"
-
-        await update.message.reply_text("💰 Enter amount to add:")
-        return
-
-    # STEP 2: GET AMOUNT
-    if state["step"] == "waiting_amount":
-        amount = text
-        ids = state["ids"]
-
-        if state["mode"] == "single":
-            output = f"[{','.join(ids)} {amount}]"
-        else:
-            output = "[\n" + "\n".join(f"{i} {amount}" for i in ids) + "\n]"
-
-        await update.message.reply_text(f"✅ Done:\n\n{output}")
-
-        # IMPORTANT: CLEAR STATE (FIX)
-        del user_states[user_id]
-
-# ===== MAIN =====
+# ---------- MAIN ----------
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(approval_request, pattern="send_approval"))
-    app.add_handler(CallbackQueryHandler(admin_action, pattern="approve_|reject_"))
-    app.add_handler(CallbackQueryHandler(option_handler, pattern="single|different"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    app.add_handler(CallbackQueryHandler(approval_buttons))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, referral_text))
 
+    print("🤖 Bot is running...")
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
