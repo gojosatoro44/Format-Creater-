@@ -14,6 +14,7 @@ from telegram.ext import (
     filters
 )
 
+# ===== VARIABLES =====
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 
@@ -21,7 +22,7 @@ approved_users = set()
 pending_users = {}
 user_states = {}
 
-# -------- START --------
+# ===== /start =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
 
@@ -35,7 +36,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-# -------- SEND APPROVAL --------
+# ===== SEND APPROVAL =====
 async def approval_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -64,7 +65,7 @@ async def approval_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.edit_message_text("✅ Approval request sent to admin.")
 
-# -------- ADMIN ACTION --------
+# ===== ADMIN APPROVE / REJECT =====
 async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -80,7 +81,6 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await show_options_to_user(uid, context)
         await query.edit_message_text("✅ User Approved")
-
     else:
         await context.bot.send_message(
             chat_id=uid,
@@ -88,7 +88,7 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await query.edit_message_text("❌ User Rejected")
 
-# -------- OPTIONS --------
+# ===== OPTIONS =====
 async def show_options(update, context):
     keyboard = [
         [InlineKeyboardButton("1️⃣ Single Amount", callback_data="single")],
@@ -110,51 +110,59 @@ async def show_options_to_user(uid, context):
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-# -------- OPTION HANDLER --------
+# ===== OPTION HANDLER (FIXED) =====
 async def option_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
     user_states[query.from_user.id] = {
-        "mode": query.data,
+        "mode": query.data,           # single / different
+        "step": "waiting_referrals",  # FIXED STEP SYSTEM
         "ids": []
     }
 
-    await query.edit_message_text(
-        "📥 Send the referral text now."
-    )
+    await query.edit_message_text("📥 Send the referral text now.")
 
-# -------- TEXT HANDLER --------
+# ===== TEXT HANDLER (FIXED LOOP ISSUE) =====
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    text = update.message.text
+    text = update.message.text.strip()
 
     if user_id not in user_states:
         return
 
     state = user_states[user_id]
 
-    if "ids" in state and not state.get("amount"):
+    # STEP 1: GET REFERRALS
+    if state["step"] == "waiting_referrals":
         ids = re.findall(r"\b\d{8,12}\b", text)
+
+        if not ids:
+            await update.message.reply_text("❌ No valid User IDs found. Send referral text again.")
+            return
+
         state["ids"] = ids
-        state["waiting_amount"] = True
+        state["step"] = "waiting_amount"
+
         await update.message.reply_text("💰 Enter amount to add:")
         return
 
-    if state.get("waiting_amount"):
-        amount = text.strip()
+    # STEP 2: GET AMOUNT
+    if state["step"] == "waiting_amount":
+        amount = text
         ids = state["ids"]
 
         if state["mode"] == "single":
             output = f"[{','.join(ids)} {amount}]"
         else:
-            lines = [f"{i} {amount}" for i in ids]
-            output = "[\n" + "\n".join(lines) + "\n]"
+            output = "[\n" + "\n".join(f"{i} {amount}" for i in ids) + "\n]"
 
         await update.message.reply_text(f"✅ Done:\n\n{output}")
-        user_states.pop(user_id)
 
-# -------- MAIN --------
+        # IMPORTANT: CLEAR STATE (FIX)
+        del user_states[user_id]
+
+# ===== MAIN =====
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
