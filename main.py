@@ -9,7 +9,7 @@ from telegram.ext import (
 )
 
 # ================= CONFIG =================
-BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
+BOT_TOKEN = "8574662523:AAGSg0u6Uq_y0G2OP8jWj-DYxC9AYwwRq80"
 ADMIN_ID = 7112312810  # your admin id
 # ==========================================
 
