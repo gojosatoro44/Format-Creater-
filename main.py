@@ -13,7 +13,7 @@ BOT_TOKEN = "8574662523:AAGSg0u6Uq_y0G2OP8jWj-DYxC9AYwwRq80"
 ADMIN_ID = 7112312810  # your admin id
 # ==========================================
 
-pending_users = set()
+pending_users = {}  # Changed to dict to store user info
 approved_users = set()
 
 # ---------- START ----------
@@ -37,8 +37,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    pending_users.add(user.id)
+    # Store user info
+    pending_users[user.id] = {
+        'name': user.first_name,
+        'username': user.username
+    }
 
+    # Create approval keyboard
     keyboard = [
         [
             InlineKeyboardButton("✅ Approve", callback_data=f"approve_{user.id}"),
@@ -47,10 +52,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
 
     text = (
-        "📩 *Approval Request*\n\n"
+        "📩 *New User Requesting Access*\n\n"
         f"👤 *Name:* {user.first_name}\n"
         f"🆔 *User ID:* `{user.id}`\n"
-        f"🔗 *Username:* @{user.username if user.username else 'Not Set'}"
+        f"🔗 *Username:* @{user.username if user.username else 'Not Set'}\n\n"
+        "❓ Do you want to approve this user?"
     )
 
     await context.bot.send_message(
@@ -61,8 +67,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     await update.message.reply_text(
-        "✅ *Approval request sent to admin.*\n"
-        "⏳ Please wait…",
+        "✅ *Request sent to admin.*\n"
+        "⏳ Please wait for approval…",
         parse_mode="Markdown"
     )
 
@@ -77,7 +83,8 @@ async def approval_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("approve"):
         approved_users.add(user_id)
-        pending_users.discard(user_id)
+        if user_id in pending_users:
+            del pending_users[user_id]
 
         await context.bot.send_message(
             chat_id=user_id,
@@ -94,7 +101,8 @@ async def approval_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif data.startswith("reject"):
-        pending_users.discard(user_id)
+        if user_id in pending_users:
+            del pending_users[user_id]
 
         await context.bot.send_message(
             chat_id=user_id,
@@ -128,42 +136,32 @@ async def referral_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Count total IDs
     total_ids = len(ids)
     
-    # Join IDs with newlines for easy copying
-    clean_ids = "\n".join(ids)
+    # Calculate amount (₹3 per ID)
+    total_amount = total_ids * 3
 
-    # Send formatted message to admin
-    formatted_text = (
-        "🚀 *NEW REFERRALS RECEIVED*\n\n"
-        f"👤 *User:* {user.first_name}\n"
-        f"🆔 *User ID:* `{user.id}`\n"
-        f"📊 *Total IDs:* {total_ids}\n"
-        f"💰 *Total Amount:* ₹{total_ids * 3}\n\n"
-        "📋 *IDs (tap to copy):*"
-    )
-
-    await context.bot.send_message(
-        chat_id=ADMIN_ID,
-        text=formatted_text,
-        parse_mode="Markdown"
-    )
-    
-    # Send IDs separately in monospace format for easy copying
-    if clean_ids:
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=f"```\n{clean_ids}\n```",
+    if not ids:
+        await update.message.reply_text(
+            "❌ *No valid IDs found!*\n\n"
+            "Please send referral text with valid IDs.",
             parse_mode="Markdown"
         )
-    else:
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text="❌ No valid IDs found in the message."
-        )
+        return
+
+    # Format: [id,id,id amount]
+    formatted_output = f"[{','.join(ids)} {total_amount}]"
+
+    # Send to admin in copyable format
+    await context.bot.send_message(
+        chat_id=ADMIN_ID,
+        text=f"```\n{formatted_output}\n```",
+        parse_mode="Markdown"
+    )
 
     # Confirm to user
     await update.message.reply_text(
-        f"✅ *Referral text sent successfully!*\n\n"
-        f"📊 Total IDs extracted: {total_ids}",
+        f"✅ *Sent successfully!*\n\n"
+        f"📊 Total IDs: {total_ids}\n"
+        f"💰 Amount: ₹{total_amount}",
         parse_mode="Markdown"
     )
 
